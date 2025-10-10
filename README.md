@@ -48,6 +48,10 @@ Für das Projekt werden folgende Arduino-Libraries benötigt:
 
 Der vollständige Arduino-Sketch befindet sich in der Datei `mkrnb1500_udp_sensor.ino`.
 
+## Vollständige Anleitung
+Eine detaillierte Schritt-für-Schritt-Anleitung mit Bildern, Code-Erklärungen und weiteren Tipps findest du auf:
+👉 [https://prilchen.de/arduino-datenuebertragung-aus-abgelegenen-gebieten-per-iot-sim-karte/](https://prilchen.de/arduino-datenuebertragung-aus-abgelegenen-gebieten-per-iot-sim-karte/)
+
 ## Lizenz
 
 Dieses Projekt steht unter der MIT-Lizenz.
