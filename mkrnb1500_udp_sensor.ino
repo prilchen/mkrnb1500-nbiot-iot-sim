@@ -1,88 +1,86 @@
 #include <MKRNB.h>
-#include "ArduinoLowPower.h"
-#include <RTCZero.h>
+#include <ArduinoLowPower.h>
 
-// PIN-Nummer (SIM Karte)
-const char PINNUMBER[] = "";
+NB netzZugang;
+NBUDP udpSocket;
 
-// APN Data (IoT.1nce.net)
-const char GPRS_APN[] = "iot.1nce.net";
-const char GPRS_LOGIN[] = "";
-const char GPRS_PASSWORD[] = "";
+const int sensorPin = A0;                        // Analogeingang für Sensor
+const unsigned long sendeIntervallMs = 3600000;  // 60 Minuten (in ms)
+const char* zielIp = "udp.os.1nce.com";          // Ziel-IP im 1NCE NAT-Backbone
+const int zielPort = 4445;                       // Ziel-Port im Backend
+const char* apn = "iot.1nce.net";                // APN für 1NCE
 
-// Empfänger (IP-Adresse des Rechners)
-const char server[] = "192.168.178.xx";
-const int port = 9999;
+unsigned long zeitLetzteSendung = 0;             // Zeitpunkt der letzten Sendung
 
-// NB-IoT Objekte
-NB nbAccess;
-GPRS gprsAccess;
-NBUDP udpClient;
-RTCZero rtc;
+// Hilfsfunktion: Verbindung aufbauen
+bool verbindeNetz() {
+  Serial.print("Stelle Mobilfunkverbindung her (APN: ");
+  Serial.print(apn);
+  Serial.print(") ... ");
 
-// Variablen
-int sensorValue = 0;
-int status = NB_ERROR;
-unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 60000; // 60 Sekunden
+  if (netzZugang.begin(apn) != NB_READY) {
+    Serial.println("Fehler!");
+    return false;
+  }
+
+  Serial.println("OK, Mobilfunk verbunden.");
+  return true;
+}
 
 void setup() {
-  // Serielle Kommunikation starten
   Serial.begin(9600);
-  while (!Serial) {
-    ; // Warten auf serielle Verbindung
+  while (!Serial); // Warten auf Serial Monitor
+
+  Serial.println("NB-IoT UDP-Sensor startet...");
+
+  // Erste Netzverbindung versuchen
+  while (!verbindeNetz()) {
+    Serial.println("Neuer Versuch in 30 Sekunden...");
+    delay(30000);
   }
 
-  Serial.println("Starting NB-IoT connection...");
+  udpSocket.begin(zielPort);
 
-  // Verbindung zum NB-IoT-Netzwerk herstellen
-  while (status != NB_READY) {
-    Serial.println("Attempting NB-IoT network connection");
-    status = nbAccess.begin(PINNUMBER);
-
-    if (status != NB_READY) {
-      Serial.println("Connection failed. Retrying...");
-      delay(1000);
-    } else {
-      Serial.println("Connected to NB-IoT network");
-    }
-  }
-
-  // GPRS-Verbindung herstellen
-  Serial.println("Attaching to GPRS...");
-  if (gprsAccess.attachGPRS(GPRS_APN, GPRS_LOGIN, GPRS_PASSWORD) == GPRS_READY) {
-    Serial.println("GPRS attached");
-  } else {
-    Serial.println("GPRS connection failed");
-    while (true);
-  }
-
-  // RTC initialisieren
-  rtc.begin();
+  // Sofort beim ersten loop() senden
+  zeitLetzteSendung = millis() - sendeIntervallMs;
 }
 
 void loop() {
-  unsigned long currentTime = millis();
+  // Prüfen, ob es Zeit für eine Sendung ist
+  if (millis() - zeitLetzteSendung >= sendeIntervallMs) {
+    int sensorsignal = analogRead(sensorPin);
+    uint8_t messwertByte = sensorsignal / 4;
 
-  // Daten senden alle 60 Sekunden
-  if (currentTime - lastSendTime >= sendInterval) {
-    lastSendTime = currentTime;
-
-    // Sensor auslesen (Beispiel: analoger Eingang A0)
-    sensorValue = analogRead(A0);
-
-    Serial.print("Sensor Value: ");
-    Serial.println(sensorValue);
+    Serial.print("Sende Sensorwert: ");
+    Serial.print(messwertByte);
+    Serial.print(" (ADC: ");
+    Serial.print(sensorsignal);
+    Serial.println(") über UDP...");
 
     // UDP-Paket senden
-    udpClient.beginPacket(server, port);
-    udpClient.print("Sensor: ");
-    udpClient.print(sensorValue);
-    udpClient.endPacket();
+    if (!udpSocket.beginPacket(zielIp, zielPort)) {
+      Serial.println("Fehler beim Öffnen des UDP-Pakets. Versuche Reconnect...");
+      if (!verbindeNetz()) {
+        Serial.println("Netz nicht verfügbar – überspringe diesen Zyklus.");
+        return; // Nicht senden, nächster Versuch im nächsten Zyklus
+      }
+    }
 
-    Serial.println("Data sent via UDP");
+    udpSocket.write(&messwertByte, 1);
+    if (udpSocket.endPacket() == 1) {
+      Serial.println("UDP-Versand erfolgreich.");
+    } else {
+      Serial.println("UDP-Versand fehlgeschlagen!");
+    }
+
+    // Zeitstempel für nächste Sendung merken
+    zeitLetzteSendung = millis();
+
+    // ⚡ Strom sparen: für das Intervall in Sleep gehen
+    Serial.println("Gehe in Sleep-Modus...");
+    LowPower.sleep(sendeIntervallMs);
+    Serial.println("Aufgewacht.");
   }
 
-  // Deep Sleep für Energieeinsparung (optional)
-  // LowPower.sleep(50000); // 50 Sekunden Sleep
+  delay(200); // kleine Entlastung
 }
